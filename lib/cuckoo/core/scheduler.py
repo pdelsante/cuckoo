@@ -218,6 +218,7 @@ class AnalysisManager(Thread):
             if sniffer:
                 sniffer.stop()
 
+            reset = True
             return (succeeded, reset)
         else:
             try:
@@ -233,6 +234,7 @@ class AnalysisManager(Thread):
                 if sniffer:
                     sniffer.stop()
                 
+                reset = True
                 return (succeeded, reset)
             except CuckooGuestError as e:
                 log.error(str(e), extra={"task_id" : self.task.id})
