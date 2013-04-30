@@ -64,13 +64,13 @@ class MachineManager(object):
                 machine.platform = machine_opts["platform"].strip()
                 machine.ip = machine_opts["ip"].strip()
                 
-                if machine_opts.has_key("interface"):
-                        machine.interface = machine_opts["interface"]
+                if "interface" in machine_opts:
+                        machine.interface = machine_opts["interface"].strip()
                 else:
                         machine.interface = None
 
-                if machine_opts.has_key("snapshot"):
-                        machine.snapshot = machine_opts["snapshot"]
+                if "snapshot" in machine_opts:
+                        machine.snapshot = machine_opts["snapshot"].strip()
                 else:
                         machine.snapshot = None
 
@@ -209,6 +209,12 @@ class MachineManager(object):
             time.sleep(1)
             waitme += 1
             current = self._status(label)
+
+    def kick(self, label):
+        self.db.set_machine_broken(label, broken=True)
+    
+    def unkick(self, label):
+        self.db.set_machine_broken(label, broken=False)
 
 class LibVirtMachineManager(MachineManager):
     """Libvirt based machine manager.

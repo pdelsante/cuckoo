@@ -12,7 +12,7 @@ from StringIO import StringIO
 from zipfile import ZipFile, BadZipfile, ZIP_STORED
 
 from lib.cuckoo.common.config import Config
-from lib.cuckoo.common.exceptions import CuckooGuestError
+from lib.cuckoo.common.exceptions import CuckooGuestError, CuckooGuestInitializationError
 from lib.cuckoo.common.constants import *
 from lib.cuckoo.common.utils import TimeoutServer
 
@@ -130,7 +130,11 @@ class GuestManager:
             # Wait for the agent to respond. This is done to check the
             # availability of the agent and verify that it's ready to receive
             # data.
-            self.wait(CUCKOO_GUEST_INIT)
+            try:
+                self.wait(CUCKOO_GUEST_INIT)
+            except Exception as e:
+                log.error("{0}: guest initialization failed: {1}".format(self.id, e))
+                raise CuckooGuestInitializationError("Guest initialization failed: {0}".format(e))
             # Invoke the upload of the analyzer to the guest.
             self.upload_analyzer()
             # Give the analysis options to the guest, so it can generate the

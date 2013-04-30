@@ -44,6 +44,8 @@ class Machine(Base):
     locked_changed_on = Column(DateTime(timezone=False), nullable=True)
     status = Column(String(255), nullable=True)
     status_changed_on = Column(DateTime(timezone=False), nullable=True)
+    broken = Column(Boolean(), nullable=False, default=False)
+    broken_changed_on = Column(DateTime(timezone=False), nullable=True)
 
     def __repr__(self):
         return "<Machine('%s','%s')>" % (self.id, self.name)
@@ -604,6 +606,36 @@ class Database(object):
         else:
             session.close()
 
+    def set_machine_broken(self, label, broken=True):
+        """Set broken status for a virtual machine.
+        @param label: virtual machine label
+        @param broken: virtual machine broken status (True|False), default True
+        """
+        session = self.Session()
+        try:
+            machine = session.query(Machine).filter(Machine.label == label).first()
+        except SQLAlchemyError:
+            session.close()
+            return
+        
+        if machine:
+            machine.broken = broken
+            machine.broken_changed_on = datetime.now()
+            
+            # Be sure to lock/unlock the VM according to whether it's broken or not
+            machine.locked = broken
+            machine.locked_changed_on = datetime.now()
+            
+            try:
+                session.commit()
+                session.refresh(machine)
+            except SQLAlchemyError:
+                session.rollback()
+            finally:
+                session.close()
+        else:
+            session.close()
+
     def add_error(self, message, task_id):
         """Add an error related to a task.
         @param message: error message
@@ -818,6 +850,32 @@ class Database(object):
         finally:
             session.close()
         return True
+
+    def reset_task(self, task_id):
+        """Reset a task as pending.
+        @param task_id: ID of the task to reset.
+        @return: operation status.
+        """
+        session = self.Session()
+        try:
+            task = session.query(Task).get(task_id)
+        except SQLAlchemyError:
+            session.close()
+            return
+        
+        if task:
+            task.status = "pending"
+            task.completed_on = None
+            
+            try:
+                session.commit()
+                session.refresh(task)
+            except SQLAlchemyError:
+                session.rollback()
+            finally:
+                session.close()
+        else:
+            session.close()
 
     def view_sample(self, task_id):
         """Retrieve information on a sample given a task id.

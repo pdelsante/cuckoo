@@ -164,17 +164,18 @@ class AnalysisManager(Thread):
         """Start analysis."""
         sniffer = None
         succeeded = False
+        reset = True
 
         log.info("Starting analysis of %s \"%s\" (task=%d)", self.task.category.upper(), self.task.target, self.task.id)
 
         # Initialize the the analysis folders.
         if not self.init_storage():
-            return False
+            return (succeeded, reset)
 
         if self.task.category == "file":
             # Store a copy of the original file.
             if not self.store_file():
-                return False
+                return (succeeded, reset)
 
         # Generate the analysis configuration file.
         options = self.build_options()
@@ -217,13 +218,22 @@ class AnalysisManager(Thread):
             if sniffer:
                 sniffer.stop()
 
-            return False
+            return (succeeded, reset)
         else:
             try:
                 # Initialize the guest manager.
                 guest = GuestManager(machine.name, machine.ip, machine.platform)
                 # Start the analysis.
                 guest.start_analysis(options)
+            except CuckooGuestInitializationError as e:
+                log.error("Kicking virtual machine {0}".format(machine.label),
+                          extra={"task_id" : self.task.id})
+                mmanager.kick(machine.label)
+                
+                if sniffer:
+                    sniffer.stop()
+                
+                return (succeeded, reset)
             except CuckooGuestError as e:
                 log.error(str(e), extra={"task_id" : self.task.id})
 
@@ -231,8 +241,10 @@ class AnalysisManager(Thread):
                 if sniffer:
                     sniffer.stop()
 
-                return False
+                reset = False
+                return (succeeded, reset)
             else:
+                reset = False
                 # Wait for analysis completion.
                 try:
                     guest.wait_for_completion()
@@ -276,7 +288,7 @@ class AnalysisManager(Thread):
             # after all this, we can make the Resultserver forget about it
             Resultserver().del_task(self.task, machine)
 
-        return succeeded
+        return (succeeded, reset)
 
     def process_results(self):
         """Process the analysis results and generate the enabled reports."""
@@ -298,13 +310,51 @@ class AnalysisManager(Thread):
 
     def run(self):
         """Run manager thread."""
-        success = self.launch_analysis()
-        Database().complete(self.task.id, success)
+        success, reset = self.launch_analysis()
+        if reset:
+            self.reset_task()
+            log.info("Task #%d: reset to pending status due to VM errors")
+        else:
+            Database().complete(self.task.id, success)
 
-        self.process_results()
+            self.process_results()
 
-        log.debug("Released database task #%d with status %s", self.task.id, success)
-        log.info("Task #%d: analysis procedure completed", self.task.id)
+            log.debug("Released database task #%d with status %s", self.task.id, success)
+            log.info("Task #%d: analysis procedure completed", self.task.id)
+
+    def reset_task(self):
+        """Reset current task as pending and delete any partial results"""
+        
+        if self.task.category == "file":
+            # Restore the exe file to its original path
+            if not os.path.exists(self.task.target):
+                if not os.path.exists(os.path.dirname(self.task.target)):
+                    try:
+                        log.debug("Task #%d: Creating directory %s" %(self.task.id, os.path.dirname(self.task.target)))
+                        os.makedirs(os.path.dirname(self.task.target))
+                    except:
+                        log.error("Task #%d: Unable to create directory %s" %(self.task.id, os.path.dirname(self.task.target)))
+                        return False
+                
+                try:
+                    log.debug("Task #%d: Copying %s to %s" %(self.task.id, self.binary, self.task.target))
+                    shutil.copyfile(self.binary, self.task.target)
+                except:
+                    log.error("Task #%d: Unable to copy %s to %s" %(self.task.id, self.binary, self.task.target))
+                    return False
+
+        # Delete the results directory
+        if os.path.exists(self.storage):
+            try:
+                log.debug("Trying to remove results directory %s" %self.storage)
+                shutil.rmtree(self.storage)
+            except:
+                log.error("Unable to remove results directory %s" %self.storage)
+                return False
+        
+        Database().reset_task(self.task.id)
+        
+        return True
 
 class Scheduler:
     """Tasks Scheduler.
