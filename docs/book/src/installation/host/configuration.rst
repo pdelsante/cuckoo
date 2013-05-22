@@ -161,6 +161,37 @@ You will find a section for each network analysis module::
     # Specify the path to your local installation of tcpdump. Make sure this
     # path is correct.
     tcpdump = /usr/sbin/tcpdump
+    
+    [snort]
+    # Enable or disable the use of an external Snort IDS [yes/no].
+    enabled = no
+
+    # Specify the path to your local installation of snort. Make sure this
+    # path is correct.
+    snort = /usr/sbin/snort
+
+    # Optional: specify whether snort should be run with sudo [yes/no]. Defaults to "no"
+    # If enabling this option, please configure your sudoers file so that snort can be run
+    # without password by cuckoo's user. Please also consider using the option "user" (see below)
+    # to change the user/UID Snort runs under after initialization.
+    # Example:
+    # use_sudo = yes
+
+    # Optional: specify a user to run snort with (option -u in snort's command line).
+    # Defaults to leaving snort run with the user it was started by.
+    # Please refer to Snort's documentation.
+    # Example:
+    # user = cuckoo
+
+    # Optional: specify a umask to use when creating output logs (option -m in snort's
+    # command line). The correct value depends on your setup, please test it before using
+    # in production. Please refer to Snort's documentation.
+    # Example:
+    # umask = 0011
+
+If you plan to use Snort and installed it following the installation guide in :ref:`installing_snort`,
+please make sure that ``use_sudo`` is set to yes and that ``user`` is set to the name of the user
+running Cuckoo.
 
 .. _processing_conf:
 

@@ -87,6 +87,8 @@ are not familiar with it please refer to the `official documentation`_.
 .. _official download page: https://www.virtualbox.org/wiki/Linux_Downloads
 .. _official documentation: https://www.virtualbox.org/wiki/Documentation
 
+.. _installing_tcpdump:
+
 Installing Tcpdump
 ==================
 
@@ -120,3 +122,47 @@ Or otherwise (**not recommended**) do::
 
 .. _tcpdump: http://www.tcpdump.org
 
+.. _installing_snort:
+
+Installing Snort
+================
+
+As an optional additional module, Cuckoo can use Snort IDS to analyze the network traffic
+and detect any alerts fired by it.
+
+To install `Snort`_ on Ubuntu::
+
+    $ sudo apt-get install snort
+
+This command will also install some prerequisites and dependencies, among which
+snort-rules-default (a default ruleset) and `oinkmaster`_, a tool to automatically download
+and install new Snort rules from various open repositories.
+    
+Snort requires root privileges to run but, once it has been started, it can
+be configured to change its user to a non-root one. To do this, Snort should
+be started using ``sudo``, then we'll use the ``-u`` command line option to change the
+running user. To configure your system to allow cuckoo's user to start Snort with
+the sudo command without requiring a password, you should edit your sudoers file
+with the following command::
+
+    $ sudo visudo
+
+Then add the following line near the end of the file, right before any ``#include`` and ``#includedir``
+directive (assuming that your Cuckoo install is running with the username "cuckoo")::
+
+    cuckoo ALL=NOPASSWD:/usr/bin/snort
+
+You can check the correct path to the snort executable by running::
+
+    $ which snort
+
+If you are using this setup, please make sure that your networkanalyzer.conf file has the following
+options enabled in the `snort` section::
+
+    use_sudo = yes
+    username = cuckoo
+
+Please refer to :ref:`networkanalyzer_conf` to know how to do this.
+
+.. _Snort: http://www.snort.org
+.. _oinkmaster: http://oinkmaster.sourceforge.net
