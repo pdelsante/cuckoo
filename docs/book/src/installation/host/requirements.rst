@@ -136,8 +136,9 @@ To install `Snort`_ on Ubuntu::
 
 This command will also install some prerequisites and dependencies, among which
 snort-rules-default (a default ruleset) and `oinkmaster`_, a tool to automatically download
-and install new Snort rules from various open repositories.
-    
+and install new Snort rules from various open repositories. Please refer to
+Snort and oinkmaster's documentation to know how to properly configure them.
+
 Snort requires root privileges to run but, once it has been started, it can
 be configured to change its user to a non-root one. To do this, Snort should
 be started using ``sudo``, then we'll use the ``-u`` command line option to change the
