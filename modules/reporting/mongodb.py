@@ -66,16 +66,38 @@ class MongoDB(Report):
         """
         self.connect()
 
+        # Set an unique index on stored files, to avoid duplicates.
+        # From pymongo docs:
+        #  Returns the name of the created index if an index is actually created.
+        #  Returns None if the index already exists.
+        self.db.fs.files.ensure_index("sha256", unique=True, name="sha256_unique")
+
         # Create a copy of the dictionary. This is done in order to not modify
         # the original dictionary and possibly compromise the following
         # reporting modules.
         report = dict(results)
 
-        # Set an unique index on stored files, to avoid duplicates.
-        # From pymongo docs:
-        #  Returns the name of the created index if an index is actually created. 
-        #  Returns None if the index already exists.
-        self.db.fs.files.ensure_index("sha256", unique=True, name="sha256_unique")
+        # Check whether the analysis already exists to avoid inserting duplicates.
+        # For example when re-running an analysis with process.py utility.
+        # If a duplicated is detected, add a '_id' field to the report and update it
+        # instead of creating a new one. Also delete old api calls as they will be recreated
+        # later on.
+
+        # Use ID and timestamp to detect dups, beacuse if using only id if the SQL db
+        # is cleaned up you may delete not duplicated analysis.
+        old_analysis = self.db.analysis.find_one({"info.id": results["info"]["id"],
+                                                  "info.started": results["info"]["started"],
+                                                  "info.ended": results["info"]["ended"]})
+        if old_analysis:
+            old_id = old_analysis.get("_id")
+            if old_id:
+                report["_id"] = old_id
+                try:
+                    for process in old_analysis["behavior"]["processes"]:
+                        for chunk_id in process["calls"]:
+                            self.db.calls.remove(chunk_id)
+                except KeyError:
+                    pass
 
         # Store the PCAP file in GridFS and reference it back in the report.
         pcap_path = os.path.join(self.analysis_path, "dump.pcap")
@@ -153,5 +175,5 @@ class MongoDB(Report):
         report["behavior"]["processes"] = new_processes
 
         # Store the report and retrieve its object id.
-        self.db.analysis.insert(report)
+        self.db.analysis.save(report)
         self.conn.disconnect()

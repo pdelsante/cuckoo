@@ -5,6 +5,7 @@
 import os
 import sys
 import json
+import logging
 from datetime import datetime
 
 from lib.cuckoo.common.constants import CUCKOO_ROOT
@@ -29,6 +30,8 @@ except ImportError:
     raise CuckooDependencyError("SQLAlchemy library not found, "
                                 "verify your setup")
 
+log = logging.getLogger(__name__)
+
 class Machine(Base):
     """Configured virtual machines to be used as guests."""
     __tablename__ = "machines"
@@ -44,6 +47,8 @@ class Machine(Base):
     locked_changed_on = Column(DateTime(timezone=False), nullable=True)
     status = Column(String(255), nullable=True)
     status_changed_on = Column(DateTime(timezone=False), nullable=True)
+    resultserver_ip = Column(String(255), nullable=False)
+    resultserver_port = Column(String(255), nullable=False)
     broken = Column(Boolean(), nullable=False, default=False)
     broken_changed_on = Column(DateTime(timezone=False), nullable=True)
 
@@ -74,14 +79,18 @@ class Machine(Base):
                  label,
                  ip,
                  platform,
-                 interface = None,
-                 snapshot = None):
+                 interface,
+                 snapshot,
+                 resultserver_ip,
+                 resultserver_port):
         self.name = name
         self.label = label
         self.ip = ip
         self.platform = platform
         self.interface = interface
         self.snapshot = snapshot
+        self.resultserver_ip = resultserver_ip
+        self.resultserver_port = resultserver_port
 
 class Guest(Base):
     """Tracks guest run."""
@@ -237,6 +246,9 @@ class Task(Base):
     platform = Column(String(255), nullable=True)
     memory = Column(Boolean, nullable=False, default=False)
     enforce_timeout = Column(Boolean, nullable=False, default=False)
+    clock = Column(DateTime(timezone=False),
+                   default=datetime.now,
+                   nullable=False)
     added_on = Column(DateTime(timezone=False),
                       default=datetime.now,
                       nullable=False)
@@ -362,13 +374,19 @@ class Database(object):
                     label,
                     ip,
                     platform,
-                    interface=None,
-                    snapshot=None):
+                    interface,
+                    snapshot,
+                    resultserver_ip,
+                    resultserver_port):
         """Add a guest machine.
         @param name: machine id
         @param label: machine label
         @param ip: machine IP address
         @param platform: machine supported platform
+        @param interface: sniffing interface for this machine
+        @param snapshot: snapshot name to use instead of the current one, if configured
+        @param resultserver_ip: IP address of the Result Server
+        @param resultserver_port: port of the Result Server
         """
         session = self.Session()
         machine = Machine(name=name,
@@ -376,7 +394,9 @@ class Database(object):
                           ip=ip,
                           platform=platform,
                           interface=interface,
-                          snapshot=snapshot)
+                          snapshot=snapshot,
+                          resultserver_ip=resultserver_ip,
+                          resultserver_port=resultserver_port)
         session.add(machine)
         try:
             session.commit()
@@ -663,9 +683,10 @@ class Database(object):
             machine="",
             platform="",
             memory=False,
-            enforce_timeout=False):
+            enforce_timeout=False,
+            clock=None):
         """Add a task to database.
-        @param file_path: sample path.
+        @param obj: object to add (File or URL).
         @param timeout: selected timeout.
         @param options: analysis options.
         @param priority: analysis priority.
@@ -674,9 +695,16 @@ class Database(object):
         @param platform: platform.
         @param memory: toggle full memory dump.
         @param enforce_timeout: toggle full timeout execution.
+        @param clock: virtual machine clock time
         @return: cursor or None.
         """
         session = self.Session()
+
+        # Convert empty strings and None values to a valid int
+        if not timeout:
+            timeout = 0
+        if not priority:
+            priority = 1
 
         if isinstance(obj, File):
             sample = Sample(md5=obj.get_md5(),
@@ -716,6 +744,12 @@ class Database(object):
         task.platform = platform
         task.memory = memory
         task.enforce_timeout = enforce_timeout
+        if clock:
+            try:
+                task.clock = datetime.strptime(clock, "%m-%d-%Y %H:%M:%S")
+            except ValueError:
+                log.warning("Cannot set date as requeste: wrong format! Setting date as now.")
+                task.clock = datetime.now()
         session.add(task)
 
         try:
@@ -738,7 +772,8 @@ class Database(object):
                  machine="",
                  platform="",
                  memory=False,
-                 enforce_timeout=False):
+                 enforce_timeout=False,
+                 clock=None):
         """Add a task to database from file path.
         @param file_path: sample path.
         @param timeout: selected timeout.
@@ -749,10 +784,17 @@ class Database(object):
         @param platform: platform.
         @param memory: toggle full memory dump.
         @param enforce_timeout: toggle full timeout execution.
+        @param clock: virtual machine clock time
         @return: cursor or None.
         """
         if not file_path or not os.path.exists(file_path):
             return None
+        
+        # Convert empty strings and None values to a valid int
+        if not timeout:
+            timeout = 0
+        if not priority:
+            priority = 1
 
         return self.add(File(file_path),
                         timeout,
@@ -763,7 +805,8 @@ class Database(object):
                         machine,
                         platform,
                         memory,
-                        enforce_timeout)
+                        enforce_timeout,
+                        clock)
 
     def add_url(self,
                 url,
@@ -775,7 +818,8 @@ class Database(object):
                 machine="",
                 platform="",
                 memory=False,
-                enforce_timeout=False):
+                enforce_timeout=False,
+                clock=None):
         """Add a task to database from url.
         @param url: url.
         @param timeout: selected timeout.
@@ -786,8 +830,16 @@ class Database(object):
         @param platform: platform.
         @param memory: toggle full memory dump.
         @param enforce_timeout: toggle full timeout execution.
+        @param clock: virtual machine clock time
         @return: cursor or None.
         """
+        
+        # Convert empty strings and None values to a valid int
+        if not timeout:
+            timeout = 0
+        if not priority:
+            priority = 1
+        
         return self.add(URL(url),
                         timeout,
                         package,
@@ -797,24 +849,44 @@ class Database(object):
                         machine,
                         platform,
                         memory,
-                        enforce_timeout)
+                        enforce_timeout,
+                        clock)
 
-    def list_tasks(self, limit=None, details=False):
+    def list_tasks(self, limit=None, details=False, offset=None):
         """Retrieve list of task.
         @param limit: specify a limit of entries.
+        @param details: if details about must be included
+        @param offset: list offset
         @return: list of tasks.
         """
         session = self.Session()
         try:
             if details:
-                tasks = session.query(Task).options(joinedload("guest"), joinedload("errors")).order_by("added_on desc").limit(limit).all()
+                tasks = session.query(Task).options(joinedload("guest"), joinedload("errors")).order_by("added_on desc").limit(limit).offset(offset).all()
             else:
-                tasks = session.query(Task).order_by("added_on desc").limit(limit).all()
+                tasks = session.query(Task).order_by("added_on desc").limit(limit).offset(offset).all()
         except SQLAlchemyError:
             return None
         finally:
             session.close()
         return tasks
+
+    def count_tasks(self, status=None):
+        """Count tasks in the database
+        @param status: apply a filter according to the task status
+        @return: number of tasks found
+        """
+        session = self.Session()
+        try:
+            if status:
+                tasks_count = session.query(Task).filter(Task.status == status).count()
+            else:
+                tasks_count = session.query(Task).count()
+        except SQLAlchemyError:
+            return 0
+        finally:
+            session.close()
+        return tasks_count
 
     def view_task(self, task_id, details=False):
         """Retrieve information on a task.
@@ -920,6 +992,21 @@ class Database(object):
         session = self.Session()
         try:
             machine = session.query(Machine).filter(Machine.name == name).first()
+        except SQLAlchemyError:
+            return None
+        finally:
+            session.expunge(machine)
+            session.close()
+        return machine
+
+    def view_machine_by_label(self, label):
+        """Show virtual machine.
+        @params label: virtual machine label
+        @return: virtual machine's details
+        """
+        session = self.Session()
+        try:
+            machine = session.query(Machine).filter(Machine.label == label).first()
         except SQLAlchemyError:
             return None
         finally:

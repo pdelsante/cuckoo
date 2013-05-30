@@ -60,26 +60,32 @@ class MachineManager(object):
                 machine_opts = self.options.get(machine_id.strip())
                 machine = Dictionary()
                 machine.id = machine_id.strip()
-                machine.label = machine_opts["label"].strip()
-                machine.platform = machine_opts["platform"].strip()
-                machine.ip = machine_opts["ip"].strip()
-                
-                if "interface" in machine_opts:
-                        machine.interface = machine_opts["interface"].strip()
-                else:
-                        machine.interface = None
+                machine.label = machine_opts["label"]
+                machine.platform = machine_opts["platform"]
+                machine.ip = machine_opts["ip"]
+                # If configured, use specific network interface for this machine, else use the default value.
+                machine.interface = machine_opts.get("interface", self.options_globals.sniffer.interface)
+                # If configured, use specific snapshot name, else leave it empty and use default behaviour.
+                machine.snapshot = machine_opts.get("snapshot", None)
+                # If configured, use specific resultserver IP and port, else use the default value.
+                machine.resultserver_ip = machine_opts.get("resultserver_ip", self.options_globals.resultserver.ip)
+                machine.resultserver_port = machine_opts.get("resultserver_port", self.options_globals.resultserver.port)
 
-                if "snapshot" in machine_opts:
-                        machine.snapshot = machine_opts["snapshot"].strip()
-                else:
-                        machine.snapshot = None
+                # Strip params.
+                for key in machine.keys():
+                    if machine[key]:
+                        # Only strip strings
+                        if isinstance(machine[key], str) or isinstance(machine[key], unicode):
+                            machine[key] = machine[key].strip()
 
                 self.db.add_machine(name=machine.id,
                                     label=machine.label,
                                     ip=machine.ip,
                                     platform=machine.platform,
                                     interface=machine.interface,
-                                    snapshot=machine.snapshot)
+                                    snapshot=machine.snapshot,
+                                    resultserver_ip=machine.resultserver_ip,
+                                    resultserver_port=machine.resultserver_port)
             except (AttributeError, CuckooOperationalError):
                 log.warning("Configuration details about machine %s are missing. Continue", machine_id)
                 continue
@@ -262,7 +268,6 @@ class LibVirtMachineManager(MachineManager):
         @raise CuckooMachineError: if unable to start virtual machine.
         """
         log.debug("Starting machine %s", label)
-        
         vm_info = self.db.view_machine(label)
         
         if self._status(label) == self.RUNNING:
@@ -274,12 +279,13 @@ class LibVirtMachineManager(MachineManager):
         try:
             snapshots = self.vms[label].snapshotListNames(flags=0)
             has_current = self.vms[label].hasCurrentSnapshot(flags=0)
-        except libvirt.libvirtError:
+        except libvirt.libvirtError as e:
             self._disconnect(conn)
-            raise CuckooMachineError("Unable to get snapshot info for virtual machine {0}".format(label))
+            raise CuckooMachineError("Unable to get snapshot info for virtual machine {0}: {1}".format(label, e))
 
-        # Revert to desired snapshot.
+        vm_info = self.db.view_machine_by_label(label)
         if vm_info.snapshot and vm_info.snapshot in snapshots:
+            # Revert to desired snapshot, if it exists.
             log.debug("Using snapshot {0} for virtual machine {1}".format(vm_info.snapshot, label))
             try:
                 self.vms[label].revertToSnapshot(self.vms[label].snapshotLookupByName(vm_info.snapshot, flags=0), flags=0)
@@ -289,6 +295,8 @@ class LibVirtMachineManager(MachineManager):
                 self._disconnect(conn)
         elif has_current:
             log.debug("Using current snapshot for virtual machine {0}".format(label))
+            # Revert to current snapshot.
+            log.debug("Using current snapshot for virtual machine {0}".format(label)) 
             try:
                 current = self.vms[label].snapshotCurrent(flags=0)
                 self.vms[label].revertToSnapshot(current, flags=0)

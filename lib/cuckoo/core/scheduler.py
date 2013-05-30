@@ -51,6 +51,7 @@ class AnalysisManager(Thread):
         self.cfg = Config()
         self.storage = ""
         self.binary = ""
+        self.machine = None
 
     def init_storage(self):
         """Initialize analysis storage folder."""
@@ -132,7 +133,7 @@ class AnalysisManager(Thread):
                 log.info("Task #%d: acquired machine %s (label=%s)", self.task.id, machine.name, machine.label)
                 break
 
-        return machine
+        self.machine = machine
 
     def build_options(self):
         """Generate analysis options.
@@ -141,13 +142,14 @@ class AnalysisManager(Thread):
         options = {}
 
         options["id"] = self.task.id
-        options["ip"] = self.cfg.resultserver.ip
-        options["port"] = self.cfg.resultserver.port
+        options["ip"] = self.machine.resultserver_ip
+        options["port"] = self.machine.resultserver_port
         options["category"] = self.task.category
         options["target"] = self.task.target
         options["package"] = self.task.package
         options["options"] = self.task.options
         options["enforce_timeout"] = self.task.enforce_timeout
+        options["clock"] = self.task.clock
 
         if not self.task.timeout or self.task.timeout == 0:
             options["timeout"] = self.cfg.timeouts.default
@@ -177,40 +179,35 @@ class AnalysisManager(Thread):
             if not self.store_file():
                 return (succeeded, reset)
 
+        # Acquire analysis machine.
+        self.acquire_machine()
+
         # Generate the analysis configuration file.
         options = self.build_options()
 
-        # Acquire analysis machine.
-        machine = self.acquire_machine()
-
         # At this point we can tell the Resultserver about it
         try:
-            Resultserver().add_task(self.task, machine)
+            Resultserver().add_task(self.task, self.machine)
         except Exception as e:
-            mmanager.release(machine.label)
+            mmanager.release(self.machine.label)
             self.errors.put(e)
 
         # If enabled in the configuration, start the tcpdump instance.
         if self.cfg.sniffer.enabled:
             sniffer = Sniffer(self.cfg.sniffer.tcpdump)
             
-            # If configured, use specific network interface for this VM, else use the default value
-            interface = self.cfg.sniffer.interface
-            if machine.interface:
-                    interface = machine.interface
-            
-            sniffer.start(interface=interface,
-                          host=machine.ip,
+            sniffer.start(interface=self.machine.interface,
+                          host=self.machine.ip,
                           file_path=os.path.join(self.storage, "dump.pcap"))
 
         try:
             # Mark the selected analysis machine in the database as started.
             guest_log = Database().guest_start(self.task.id,
-                                               machine.name,
-                                               machine.label,
+                                               self.machine.name,
+                                               self.machine.label,
                                                mmanager.__class__.__name__)
             # Start the machine.
-            mmanager.start(machine.label)
+            mmanager.start(self.machine.label)
         except CuckooMachineError as e:
             log.error(str(e), extra={"task_id" : self.task.id})
 
@@ -223,7 +220,7 @@ class AnalysisManager(Thread):
         else:
             try:
                 # Initialize the guest manager.
-                guest = GuestManager(machine.name, machine.ip, machine.platform)
+                guest = GuestManager(self.machine.name, self.machine.ip, self.machine.platform)
                 # Start the analysis.
                 guest.start_analysis(options)
             except CuckooGuestInitializationError as e:
@@ -263,7 +260,7 @@ class AnalysisManager(Thread):
             # Take a memory dump of the machine before shutting it off.
             if self.cfg.cuckoo.memory_dump or self.task.memory:
                 try:
-                    mmanager.dump_memory(machine.label,
+                    mmanager.dump_memory(self.machine.label,
                                          os.path.join(self.storage, "memory.dmp"))
                 except NotImplementedError:
                     log.error("The memory dump functionality is not available "
@@ -273,22 +270,22 @@ class AnalysisManager(Thread):
 
             try:
                 # Stop the analysis machine.
-                mmanager.stop(machine.label)
+                mmanager.stop(self.machine.label)
             except CuckooMachineError as e:
-                log.warning("Unable to stop machine %s: %s", machine.label, e)
+                log.warning("Unable to stop machine %s: %s", self.machine.label, e)
 
             # Market the machine in the database as stopped.
             Database().guest_stop(guest_log)
 
             try:
                 # Release the analysis machine.
-                mmanager.release(machine.label)
+                mmanager.release(self.machine.label)
             except CuckooMachineError as e:
                 log.error("Unable to release machine %s, reason %s. "
-                          "You might need to restore it manually", machine.label, e)
+                          "You might need to restore it manually", self.machine.label, e)
 
             # after all this, we can make the Resultserver forget about it
-            Resultserver().del_task(self.task, machine)
+            Resultserver().del_task(self.task, self.machine)
 
         return (succeeded, reset)
 

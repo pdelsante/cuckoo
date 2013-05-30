@@ -87,6 +87,7 @@ Following is a list of currently available resources and a brief description. Fo
             * ``custom`` *(optional)* - custom string to pass over the analysis and the processing/reporting modules
             * ``memory`` *(optional)* - enable the creation of a full memory dump of the analysis machine
             * ``enforce_timeout`` *(optional)* - enable to enforce the execution for the full timeout value
+            * ``clock`` *(optional)* - set virtual machine clock (format %m-%d-%Y %H:%M:%S)
 
         **Status codes**:
             * ``200`` - no error
@@ -120,6 +121,7 @@ Following is a list of currently available resources and a brief description. Fo
             * ``custom`` *(optional)* - custom string to pass over the analysis and the processing/reporting modules
             * ``memory`` *(optional)* - enable the creation of a full memory dump of the analysis machine
             * ``enforce_timeout`` *(optional)* - enable to enforce the execution for the full timeout value
+            * ``clock`` *(optional)* - set virtual machine clock (format %m-%d-%Y %H:%M:%S)
 
         **Status codes**:
             * ``200`` - no error
@@ -129,7 +131,7 @@ Following is a list of currently available resources and a brief description. Fo
 /tasks/list
 -----------
 
-    **GET /tasks/list/** *(int: limit)*
+    **GET /tasks/list/** *(int: limit)* **/** *(int: offset)*
 
         Returns list of tasks.
 
@@ -186,6 +188,7 @@ Following is a list of currently available resources and a brief description. Fo
 
         **Parameters**:
             * ``limit`` *(optional)* *(int)* - maximum number of returned tasks
+            * ``offset`` *(optional)* *(int)* - data offset
 
         **Status codes**:
             * ``200`` - no error
@@ -273,7 +276,7 @@ Following is a list of currently available resources and a brief description. Fo
 
         **Parameters**:
             * ``id`` *(required)* *(int)* - ID of the task to get the report for
-            * ``format`` *(optional)* - format of the report to retrieve [json/html/maec/metadata/picke]. If none is specified the JSON report will be returned
+            * ``format`` *(optional)* - format of the report to retrieve [json/html/maec/metadata/all/dropped]. If none is specified the JSON report will be returned. ``all`` returns all the result files as tar.bz2, ``dropped`` the dropped files as tar.bz2
 
         **Status codes**:
             * ``200`` - no error
